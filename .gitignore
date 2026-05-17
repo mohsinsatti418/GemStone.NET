@@ -1,0 +1,32 @@
+## User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docview
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio cache/options
+.vs/
+
+## NuGet
+*.nupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## ASP.NET
+wwwroot/uploads/
+
+## CRITICAL — never push these
+appsettings.json
+appsettings.*.json
+
+## OS files
+.DS_Store
+Thumbs.db
