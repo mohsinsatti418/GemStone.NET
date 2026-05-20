@@ -1,5 +1,6 @@
 ﻿using GemStonesApi.Interfaces;
 using GemStonesApi.ViewModels;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace GemStonesApi.Controllers
@@ -18,8 +19,12 @@ namespace GemStonesApi.Controllers
         /// <summary>
         /// Create a entry of gemstone in the database.
         /// </summary>
-        [HttpPost]
-        public async Task<IActionResult> Create([FromForm] GemStoneCreateVM viewModel, [FromForm] List<IFormFile> images, [FromForm] int thumbnailIndex = 0)
+        [HttpPost("create")]
+        [Authorize(Roles = "Admin")]        // NEW — Admin only
+        public async Task<IActionResult> Create(
+            [FromForm] GemStoneCreateVM viewModel,
+            [FromForm] List<IFormFile> images,
+            [FromForm] int thumbnailIndex = 0)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -27,21 +32,26 @@ namespace GemStonesApi.Controllers
             var newId = await _service.CreateGemStoneAsync(
                 viewModel, images, thumbnailIndex);
 
-            return Ok(new { id = newId, message = "GemStone created successfully" });
+            return Ok(new
+            {
+                id = newId,
+                message = "GemStone created successfully"
+            });
         }
 
         /// <summary>
         /// Gets all gemstones from the database.
         /// </summary>
-        /// <returns>List of all gemstones</returns>
-        [HttpGet]
+        [HttpGet("getall")]
+        // No [Authorize] — everyone can browse
         public async Task<IActionResult> GetAll()
         {
             var gemStones = await _service.GetAllGemStonesAsync();
             return Ok(gemStones);
         }
 
-        [HttpGet("{id}")]
+        [HttpGet("getbyid/{id}")]
+        // No [Authorize] — everyone can view details
         public async Task<IActionResult> GetById(int id)
         {
             if (id <= 0)
@@ -50,15 +60,19 @@ namespace GemStonesApi.Controllers
             var gemStone = await _service.GetGemStoneByIdAsync(id);
 
             if (gemStone == null)
-                return NotFound(new { message = $"GemStone with Id {id} was not found" });
+                return NotFound(new
+                {
+                    message = $"GemStone with Id {id} was not found"
+                });
 
             return Ok(gemStone);
         }
 
-        [HttpPut]
+        [HttpPut("update")]
+        [Authorize(Roles = "Admin")]        // NEW — Admin only
         public async Task<IActionResult> Update(
-          [FromForm] GemStoneUpdateVM viewModel,
-          [FromForm] List<IFormFile> newImages)
+            [FromForm] GemStoneUpdateVM viewModel,
+            [FromForm] List<IFormFile> newImages)
         {
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -68,7 +82,8 @@ namespace GemStonesApi.Controllers
             return Ok(new { message = "GemStone updated successfully" });
         }
 
-        [HttpDelete("{id}")]
+        [HttpDelete("delete/{id}")]
+        [Authorize(Roles = "Admin")]        // NEW — Admin only
         public async Task<IActionResult> Delete(int id)
         {
             if (id <= 0)
@@ -79,7 +94,8 @@ namespace GemStonesApi.Controllers
             return Ok(new { message = "GemStone deleted successfully" });
         }
 
-        [HttpPatch("{id}/restore")]
+        [HttpPatch("restore/{id}")]
+        [Authorize(Roles = "Admin")]        // NEW — Admin only
         public async Task<IActionResult> Restore(int id)
         {
             if (id <= 0)
