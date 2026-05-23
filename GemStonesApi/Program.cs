@@ -7,6 +7,9 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
+builder.WebHost.UseUrls($"http://*:{port}");
+
 var connectionString = builder.Configuration
     .GetConnectionString("DefaultConnection");
 
@@ -35,8 +38,8 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy
-                .AllowAnyOrigin()
+            
+                policy.WithOrigins("https://gem-stone-react.vercel.app")
                 .AllowAnyHeader()
                 .AllowAnyMethod();
         });
@@ -105,11 +108,10 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
+
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseHttpsRedirection();
 app.UseStaticFiles();
