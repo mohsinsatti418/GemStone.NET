@@ -2,21 +2,23 @@
 using GemStonesApi.Maps;
 using GemStonesApi.Models;
 using GemStonesApi.ViewModels;
-using Microsoft.AspNetCore.Http;
 
 namespace GemStonesApi.Services
 {
     public class GemStoneService : IGemStoneService
     {
         private readonly IGemStoneRepository _repository;
-        private readonly IWebHostEnvironment _env;
+        private readonly IAzureBlobService _blobService;
+        private readonly string _containerName;
 
         public GemStoneService(
             IGemStoneRepository repository,
-            IWebHostEnvironment env)
+            IAzureBlobService blobService,
+            IConfiguration config)
         {
             _repository = repository;
-            _env = env;
+            _blobService = blobService;
+            _containerName = config["AzureBlob:ContainerName"];
         }
 
         public async Task<int> CreateGemStoneAsync(
@@ -27,52 +29,40 @@ namespace GemStonesApi.Services
             // 1. Map ViewModel → Model
             var gemStone = GemStoneMap.ToModel(viewModel);
 
-            // 2. Save the gemstone, get back its new Id
+            // 2. Save gemstone, get new Id
             var newId = await _repository.CreateGemStoneAsync(gemStone);
 
-            // 3. Save each image to disk and record it in DB
+            // 3. Upload each image to Azure Blob
             if (images != null && images.Count > 0)
             {
-                // Security: create uploads folder if it doesn't exist
-                var uploadsFolder = Path.Combine(
-                    _env.WebRootPath, "uploads", "gemstones");
-                Directory.CreateDirectory(uploadsFolder);
+                var allowedTypes = new[]
+                {
+                    "image/jpeg", "image/png",
+                    "image/webp", "image/gif"
+                };
 
                 for (int i = 0; i < images.Count; i++)
                 {
                     var file = images[i];
 
-                    // Security: validate file is actually an image
-                    var allowedTypes = new[] {
-                        "image/jpeg", "image/png",
-                        "image/webp", "image/gif"
-                    };
-                    if (!allowedTypes.Contains(file.ContentType.ToLower()))
+                    // Security: validate content type
+                    if (!allowedTypes.Contains(
+                        file.ContentType.ToLower()))
                         continue;
 
-                    // Security: limit file size to 5 MB
+                    // Security: max 5 MB
                     if (file.Length > 5 * 1024 * 1024)
                         continue;
 
-                    // Security: generate a new random filename
-                    // Never use the original filename from the client
-                    var extension = Path.GetExtension(file.FileName).ToLower();
-                    var safeFile = $"{Guid.NewGuid()}{extension}";
-                    var fullPath = Path.Combine(uploadsFolder, safeFile);
-                    var relativeUrl = $"/uploads/gemstones/{safeFile}";
+                    // Upload to Azure — get back public URL
+                    var imageUrl = await _blobService
+                        .UploadImageAsync(file, _containerName);
 
-                    // Write the file to disk
-                    using (var stream = new FileStream(fullPath, FileMode.Create))
-                    {
-                        await file.CopyToAsync(stream);
-                    }
-
-                    // Build the image record
                     var image = new GemStoneImage
                     {
                         GemStoneId = newId,
-                        ImageUrl = relativeUrl,
-                        ImageName = file.FileName, // original name for display only
+                        ImageUrl = imageUrl,
+                        ImageName = file.FileName,
                         IsThumbnail = (i == thumbnailIndex),
                         DisplayOrder = i + 1,
                         UploadedAt = DateTime.UtcNow
@@ -85,49 +75,63 @@ namespace GemStonesApi.Services
             return newId;
         }
 
-        public async Task<IEnumerable<GemStoneListVM>> GetAllGemStonesAsync()
+        public async Task<IEnumerable<GemStoneListVM>>
+            GetAllGemStonesAsync()
         {
             return await _repository.GetAllGemStonesAsync();
         }
 
-        public async Task<GemStoneDetailVM> GetGemStoneByIdAsync(int id)
+        public async Task<GemStoneDetailVM>
+            GetGemStoneByIdAsync(int id)
         {
             return await _repository.GetGemStoneByIdAsync(id);
         }
 
         public async Task UpdateGemStoneAsync(
-    GemStoneUpdateVM viewModel,
-    List<IFormFile> newImages)
+            GemStoneUpdateVM viewModel,
+            List<IFormFile> newImages)
         {
-            // 1. Map ViewModel → Model
+            // 1. Map and update stone details
             var gemStone = GemStoneMap.ToModel(viewModel);
-
-            // 2. Update the stone details
             await _repository.UpdateGemStoneAsync(gemStone);
 
-            // 3. Delete images the user flagged for removal
+            // 2. Delete selected images from Azure AND database
             if (viewModel.DeleteImageIds != null
                 && viewModel.DeleteImageIds.Count > 0)
             {
+                // Get current stone to find image URLs
+                var existing = await _repository
+                    .GetGemStoneByIdAsync(viewModel.Id);
+
                 foreach (var imageId in viewModel.DeleteImageIds)
                 {
-                    // Also delete the file from disk
-                    // First get the image details to find its path
-                    // (we handle this simply — delete from DB,
-                    // file cleanup can be a background job)
+                    // Find the URL of this image
+                    var imageToDelete = existing?.Images?
+                        .FirstOrDefault(img => img.Id == imageId);
+
+                    if (imageToDelete != null)
+                    {
+                        // Delete from Azure first
+                        await _blobService.DeleteImageAsync(
+                            imageToDelete.ImageUrl,
+                            _containerName);
+                    }
+
+                    // Delete from database
                     await _repository.DeleteGemStoneImageAsync(
                         imageId, viewModel.Id);
                 }
             }
 
-            // 4. Upload any new images that were added
+            // 3. Upload new images to Azure
             if (newImages != null && newImages.Count > 0)
             {
-                var uploadsFolder = Path.Combine(
-                    _env.WebRootPath, "uploads", "gemstones");
-                Directory.CreateDirectory(uploadsFolder);
+                var allowedTypes = new[]
+                {
+                    "image/jpeg", "image/png",
+                    "image/webp", "image/gif"
+                };
 
-                // Find current highest display order
                 var existingStone = await _repository
                     .GetGemStoneByIdAsync(viewModel.Id);
                 var startOrder = existingStone?.Images?.Count ?? 0;
@@ -136,32 +140,20 @@ namespace GemStonesApi.Services
                 {
                     var file = newImages[i];
 
-                    var allowedTypes = new[]
-                    {
-                "image/jpeg", "image/png",
-                "image/webp", "image/gif"
-            };
-
-                    if (!allowedTypes.Contains(file.ContentType.ToLower()))
+                    if (!allowedTypes.Contains(
+                        file.ContentType.ToLower()))
                         continue;
 
                     if (file.Length > 5 * 1024 * 1024)
                         continue;
 
-                    var extension = Path.GetExtension(file.FileName).ToLower();
-                    var safeFile = $"{Guid.NewGuid()}{extension}";
-                    var fullPath = Path.Combine(uploadsFolder, safeFile);
-                    var relativeUrl = $"/uploads/gemstones/{safeFile}";
-
-                    using (var stream = new FileStream(fullPath, FileMode.Create))
-                    {
-                        await file.CopyToAsync(stream);
-                    }
+                    var imageUrl = await _blobService
+                        .UploadImageAsync(file, _containerName);
 
                     var image = new GemStoneImage
                     {
                         GemStoneId = viewModel.Id,
-                        ImageUrl = relativeUrl,
+                        ImageUrl = imageUrl,
                         ImageName = file.FileName,
                         IsThumbnail = false,
                         DisplayOrder = startOrder + i + 1,
@@ -172,7 +164,7 @@ namespace GemStonesApi.Services
                 }
             }
 
-            // 5. Change thumbnail if user selected a new one
+            // 4. Change thumbnail if requested
             if (viewModel.NewThumbnailImageId.HasValue)
             {
                 await _repository.SetThumbnailAsync(
