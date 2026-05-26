@@ -12,20 +12,32 @@ namespace GemStonesApi.Services
     {
         private readonly IAuthRepository _repository;
         private readonly IConfiguration _config;
+        private readonly ICaptchaService _captcha;
 
         public AuthService(
             IAuthRepository repository,
-            IConfiguration config)
+            IConfiguration config,
+            ICaptchaService captcha)
         {
             _repository = repository;
             _config = config;
+            _captcha = captcha;
         }
 
-        public async Task<AuthResponseVM> RegisterAsync(RegisterVM viewModel)
+        public async Task<AuthResponseVM> RegisterAsync(
+              RegisterVM viewModel)
         {
-            // Hash the password — never store plain text
-            var passwordHash = BCrypt.Net.BCrypt.HashPassword(
-                viewModel.Password, workFactor: 12);
+            // Validate captcha first
+            var isHuman = await _captcha
+                .ValidateAsync(viewModel.CaptchaToken);
+
+            if (!isHuman)
+                throw new UnauthorizedAccessException(
+                    "Captcha validation failed.");
+
+            // rest of register code unchanged...
+            var passwordHash = BCrypt.Net.BCrypt
+                .HashPassword(viewModel.Password, workFactor: 12);
 
             var user = new User
             {
@@ -37,7 +49,6 @@ namespace GemStonesApi.Services
 
             await _repository.RegisterUserAsync(user);
 
-            // After register, log them in immediately
             var token = GenerateJwtToken(user);
             var expiry = DateTime.UtcNow.AddHours(
                 double.Parse(_config["Jwt:ExpiryInHours"]));
@@ -54,25 +65,72 @@ namespace GemStonesApi.Services
 
         public async Task<AuthResponseVM> LoginAsync(LoginVM viewModel)
         {
-            // Find user by username
+            // 1. Captcha check
+            var isHuman = await _captcha
+                .ValidateAsync(viewModel.CaptchaToken);
+            if (!isHuman)
+                throw new UnauthorizedAccessException(
+                    "Captcha validation failed.");
+
+            // 2. Find user
             var user = await _repository
                 .GetUserByUsernameAsync(
                     viewModel.Username.Trim().ToLower());
 
-            // User not found
+            // 3. Same error for wrong username OR wrong password
+            //    prevents username enumeration
             if (user == null)
                 throw new UnauthorizedAccessException(
                     "Invalid username or password");
 
-            // Verify password against stored hash
+            // 4. Check if account is locked
+            if (user.LockoutUntil.HasValue
+                && user.LockoutUntil.Value > DateTime.UtcNow)
+            {
+                var minutesLeft = (int)Math.Ceiling(
+                    (user.LockoutUntil.Value - DateTime.UtcNow)
+                    .TotalMinutes);
+
+                throw new UnauthorizedAccessException(
+                    $"Account locked. Try again in {minutesLeft} minutes.");
+            }
+
+            // 5. Verify password
             var isPasswordValid = BCrypt.Net.BCrypt
                 .Verify(viewModel.Password, user.PasswordHash);
 
             if (!isPasswordValid)
-                throw new UnauthorizedAccessException(
-                    "Invalid username or password");
+            {
+                // Increment failed attempts
+                var attempts = user.FailedLoginAttempts + 1;
+                DateTime? lockoutUntil = null;
 
-            // Generate JWT token
+                // Lock after 5 failed attempts for 30 minutes
+                if (attempts >= 5)
+                {
+                    lockoutUntil = DateTime.UtcNow
+                        .AddMinutes(30);
+                }
+
+                await _repository.UpdateLoginAttemptsAsync(
+                    user.Username, attempts, lockoutUntil);
+
+                // Tell user how many attempts remain
+                var remaining = 5 - attempts;
+                if (remaining > 0)
+                    throw new UnauthorizedAccessException(
+                        $"Invalid username or password. " +
+                        $"{remaining} attempts remaining.");
+                else
+                    throw new UnauthorizedAccessException(
+                        "Account locked for 30 minutes due to " +
+                        "too many failed attempts.");
+            }
+
+            // 6. Successful login — reset failed attempts
+            await _repository.ResetLoginAttemptsAsync(user.Username);
+
+            // 7. Generate token
             var token = GenerateJwtToken(user);
             var expiry = DateTime.UtcNow.AddHours(
                 double.Parse(_config["Jwt:ExpiryInHours"]));

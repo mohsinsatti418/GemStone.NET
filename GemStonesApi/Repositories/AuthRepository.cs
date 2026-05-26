@@ -46,5 +46,38 @@ namespace GemStonesApi.Repositories
                 commandType: CommandType.StoredProcedure
             );
         }
+
+        public async Task UpdateLoginAttemptsAsync(
+    string username,
+    int failedAttempts,
+    DateTime? lockoutUntil)
+        {
+            using var connection = new SqlConnection(_connectionString);
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@Username", username);
+            parameters.Add("@FailedAttempts", failedAttempts);
+            parameters.Add("@LockoutUntil", lockoutUntil);
+
+            await connection.ExecuteAsync(
+                "sp_UpdateLoginAttempts",
+                parameters,
+                commandType: CommandType.StoredProcedure
+            );
+        }
+
+        public async Task ResetLoginAttemptsAsync(string username)
+        {
+            using var connection = new SqlConnection(_connectionString);
+
+            var parameters = new DynamicParameters();
+            parameters.Add("@Username", username);
+
+            await connection.ExecuteAsync(
+                "sp_ResetLoginAttempts",
+                parameters,
+                commandType: CommandType.StoredProcedure
+            );
+        }
     }
 }

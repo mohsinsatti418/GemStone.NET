@@ -9,5 +9,8 @@ namespace GemStonesApi.ViewModels
 
         [Required(ErrorMessage = "Password is required")]
         public string Password { get; set; }
+
+        [Required(ErrorMessage = "Captcha token is required")]
+        public string CaptchaToken { get; set; }
     }
 }

@@ -22,5 +22,8 @@ namespace GemStonesApi.ViewModels
         [Required(ErrorMessage = "Confirm password is required")]
         [Compare("Password", ErrorMessage = "Passwords do not match")]
         public string ConfirmPassword { get; set; }
+
+        [Required(ErrorMessage = "Captcha token is required")]
+        public string CaptchaToken { get; set; }
     }
 }

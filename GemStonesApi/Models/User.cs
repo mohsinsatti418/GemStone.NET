@@ -9,5 +9,8 @@
         public string Role { get; set; }
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        public int FailedLoginAttempts { get; set; }
+        public DateTime? LockoutUntil { get; set; }
     }
 }

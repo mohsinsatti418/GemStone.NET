@@ -1,6 +1,7 @@
 ﻿using GemStonesApi.Interfaces;
 using GemStonesApi.ViewModels;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace GemStonesApi.Controllers
 {
@@ -16,6 +17,7 @@ namespace GemStonesApi.Controllers
         }
 
         [HttpPost("register")]
+        [EnableRateLimiting("StrictLimit")]
         public async Task<IActionResult> Register(
             [FromBody] RegisterVM viewModel)
         {
@@ -34,6 +36,7 @@ namespace GemStonesApi.Controllers
         }
 
         [HttpPost("login")]
+        [EnableRateLimiting("StrictLimit")]
         public async Task<IActionResult> Login(
             [FromBody] LoginVM viewModel)
         {

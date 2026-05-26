@@ -6,5 +6,11 @@ namespace GemStonesApi.Interfaces
     {
         Task<int> RegisterUserAsync(User user);
         Task<User> GetUserByUsernameAsync(string username);
+
+        Task UpdateLoginAttemptsAsync(
+           string username,
+           int failedAttempts,
+           DateTime? lockoutUntil);
+        Task ResetLoginAttemptsAsync(string username);
     }
 }
